@@ -19,6 +19,8 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -58,6 +60,7 @@ async def async_setup_entry(
         }]
 
     entities: list[SensorEntity] = []
+    ent_reg = er.async_get(hass)
 
     for dev in devices:
         device_id = str(dev.get("device_id", userid))
@@ -149,12 +152,127 @@ async def async_setup_entry(
             if coordinator.data.get("body_fat") is not None:
                 entities.append(ZeppBodyFatSensor(coordinator, device_id, device_name, device_info))
 
+        # 6b. BioCharge, sleep times, respiratory rate, yesterday (v1.2.0).
+        # New entities follow the naming of this device's existing ones
+        # (e.g. sensor.amazfit_steps -> sensor.amazfit_biocharge).
+        prefix = None
+        steps_eid = ent_reg.async_get_entity_id("sensor", DOMAIN, f"{device_id}_steps")
+        if steps_eid and steps_eid.endswith("_steps"):
+            prefix = steps_eid[: -len("_steps")]
+        new_sensors: list[SensorEntity] = [
+            ZeppValueSensor(coordinator, device_id, device_info, prefix, "biocharge", "BioCharge",
+                            "biocharge", "mdi:lightning-bolt-circle", attrs={
+                                "today_min": "biocharge_today_min",
+                                "today_max": "biocharge_today_max",
+                                "physical": "biocharge_physical",
+                                "mental": "biocharge_mental",
+                                "measured_at": "biocharge_measured_at",
+                            }),
+            ZeppValueSensor(coordinator, device_id, device_info, prefix, "biocharge_physical",
+                            "BioCharge Physical", "biocharge_physical", "mdi:arm-flex"),
+            ZeppValueSensor(coordinator, device_id, device_info, prefix, "biocharge_mental",
+                            "BioCharge Mental", "biocharge_mental", "mdi:head-lightbulb"),
+            ZeppValueSensor(coordinator, device_id, device_info, prefix, "respiratory_rate",
+                            "Respiratory Rate", "respiratory_rate", "mdi:lungs", unit="breaths/min",
+                            attrs={
+                                "min": "respiratory_rate_min",
+                                "max": "respiratory_rate_max",
+                                "measured_minutes": "respiratory_rate_minutes",
+                            }),
+            ZeppTimestampSensor(coordinator, device_id, device_info, prefix, "sleep_start",
+                                "Sleep Start", "sleep_start", "mdi:bed-clock"),
+            ZeppTimestampSensor(coordinator, device_id, device_info, prefix, "sleep_end",
+                                "Sleep End", "sleep_end", "mdi:weather-sunset-up"),
+            ZeppYesterdaySensor(coordinator, device_id, device_info, prefix),
+        ]
+        entities.extend(new_sensors)
+
         # 7. Historical Sync Status
         entities.append(
             ZeppHistorySyncSensor(coordinator, device_id, device_name, device_info, hass)
         )
 
     async_add_entities(entities, update_before_add=False)
+
+
+# ==================== Generic sensors (v1.2.0) ====================
+
+class _ZeppNamedSensor(CoordinatorEntity[ZeppCoordinator], SensorEntity):
+    """Coordinator sensor whose entity_id can follow the device's existing prefix."""
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: ZeppCoordinator,
+        device_id: str,
+        device_info: DeviceInfo,
+        prefix: str | None,
+        suffix: str,
+        name: str,
+        icon: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{device_id}_{suffix}"
+        self._attr_device_info = device_info
+        self._attr_name = name
+        self._attr_icon = icon
+        if prefix:
+            self.entity_id = f"{prefix}_{suffix}"
+
+
+class ZeppValueSensor(_ZeppNamedSensor):
+    """Numeric measurement sensor backed by one coordinator key."""
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator, device_id, device_info, prefix, suffix, name, key, icon,
+                 unit: str | None = None, attrs: dict[str, str] | None = None) -> None:
+        super().__init__(coordinator, device_id, device_info, prefix, suffix, name, icon)
+        self._key = key
+        self._attr_native_unit_of_measurement = unit
+        self._attr_map = attrs or {}
+
+    @property
+    def native_value(self) -> float | None:
+        return self.coordinator.data.get(self._key)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return _attrs(self.coordinator.data, self._attr_map)
+
+
+class ZeppTimestampSensor(_ZeppNamedSensor):
+    """Bedtime / wake time as a timestamp entity (usable in automations)."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(self, coordinator, device_id, device_info, prefix, suffix, name, key, icon) -> None:
+        super().__init__(coordinator, device_id, device_info, prefix, suffix, name, icon)
+        self._key = key
+
+    @property
+    def native_value(self):
+        value = self.coordinator.data.get(self._key)
+        return dt_util.parse_datetime(value) if isinstance(value, str) else None
+
+
+class ZeppYesterdaySensor(_ZeppNamedSensor):
+    """Yesterday's complete values from the cloud. State = date, values = attributes."""
+
+    def __init__(self, coordinator, device_id, device_info, prefix) -> None:
+        super().__init__(coordinator, device_id, device_info, prefix, "yesterday_summary",
+                         "Yesterday Summary", "mdi:calendar-arrow-left")
+
+    @property
+    def native_value(self) -> str | None:
+        return (self.coordinator.data.get("yesterday") or {}).get("date")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        data = dict(self.coordinator.data.get("yesterday") or {})
+        data.pop("date", None)
+        return data
 
 
 # ==================== Device Info Sensors ====================

@@ -26,6 +26,9 @@ from .api import (
 )
 from .parsers import (
     parse_activity_today,
+    parse_charge,
+    parse_respiratory_rate,
+    parse_yesterday,
     parse_heart_rate,
     parse_hrv,
     parse_odi,
@@ -138,6 +141,14 @@ class ZeppCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "training_load_max", "training_load_overreaching",
         ),
         "weight": ("weight", "bmi", "body_fat", "muscle_mass", "body_water", "bone_mass", "weight_measured_at"),
+        "biocharge": (
+            "biocharge", "biocharge_physical", "biocharge_mental", "biocharge_measured_at",
+            "biocharge_today_min", "biocharge_today_max",
+        ),
+        "respiratory": (
+            "respiratory_rate", "respiratory_rate_min", "respiratory_rate_max", "respiratory_rate_minutes",
+        ),
+        "yesterday": ("yesterday",),
     }
 
     def _apply(self, result: dict[str, Any], section: str, values: dict[str, Any] | None) -> None:
@@ -265,6 +276,41 @@ class ZeppCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ) or []
         readiness = parse_readiness(rd_v2, rd_v1) if (rd_v2 or rd_v1) else None
         self._apply(result, "readiness", readiness)
+
+        # 6b. BioCharge (per-minute energy score) -------------------------------
+        charge_items = await guarded(
+            "BioCharge",
+            async_fetch_v2_events(*api, "Charge", sub_type="real_data",
+                                  from_ts=days_ago_ms(3), to_ts=to_ms, limit=10, reverse=True),
+        ) or []
+        self._apply(result, "biocharge", parse_charge(charge_items, tz, now.date()) if charge_items else None)
+
+        # 6c. Overnight respiratory rate ---------------------------------------
+        resp_items = await guarded(
+            "respiratory rate",
+            async_fetch_v2_events(*api, "RespiratoryRate", sub_type="real_data",
+                                  from_ts=days_ago_ms(3), to_ts=to_ms, limit=10, reverse=True),
+        )
+        resp = None
+        if resp_items:
+            resp = parse_respiratory_rate(
+                resp_items,
+                (sleep or {}).get("_sleep_start_s"),
+                (sleep or {}).get("_sleep_end_s"),
+            )
+        self._apply(result, "respiratory", resp)
+
+        # 6d. Yesterday, complete, straight from the cloud ---------------------
+        yesterday = None
+        if band_items:
+            yesterday = parse_yesterday(
+                band_items, stress_items or [], pai_items or [], charge_items,
+                tz, (now - datetime.timedelta(days=1)).date(),
+            )
+        self._apply(result, "yesterday", {"yesterday": yesterday} if yesterday else None)
+        expected_day = (now - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+        if (result.get("yesterday") or {}).get("date") != expected_day:
+            result["yesterday"] = None  # never show the day before yesterday as "yesterday"
 
         # Derived values -------------------------------------------------------
         result["breathing_score"] = (

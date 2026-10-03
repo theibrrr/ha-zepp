@@ -127,6 +127,16 @@ Unlike solutions that require installing third-party JavaScript apps on your wat
 | **Heart Rate Variability (HRV)** | `_hrv` | `measurement` | ms | Heart rate variability (rMSSD) |
 | **Readiness Score** | `_readiness_score` | `measurement` | score | Morning physical and mental recovery score |
 
+### 5b. Added in this fork (1.2.0)
+
+| Sensor | Entity ID Suffix | Unit | Description / Attributes |
+| :--- | :--- | :--- | :--- |
+| **BioCharge** | `_biocharge` | score | Energy score 0–100 (per minute). Attributes: `today_min`, `today_max`, `physical`, `mental`, `measured_at` |
+| **BioCharge Physical / Mental** | `_biocharge_physical` / `_biocharge_mental` | score | The two components of BioCharge |
+| **Sleep Start / Sleep End** | `_sleep_start` / `_sleep_end` | timestamp | Bedtime and wake time of the last night |
+| **Respiratory Rate** | `_respiratory_rate` | breaths/min | Overnight average. Attributes: `min`, `max` |
+| **Yesterday Summary** | `_yesterday_summary` | date | Yesterday's complete values from the cloud as attributes |
+
 ### 5. Workout Training Load
 
 | Sensor | Entity ID Suffix | State Class | Description / Attributes |

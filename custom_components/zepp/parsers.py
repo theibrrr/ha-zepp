@@ -398,3 +398,164 @@ def parse_weight(items: list[dict[str, Any]]) -> dict[str, Any] | None:
             "weight_measured_at": ms_to_dt(when(item)).isoformat() if when(item) else None,
         }
     return None
+
+
+# --------------------------------------------------------------------------
+# BioCharge (v2 Charge / real_data)
+# --------------------------------------------------------------------------
+def _charge_samples(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """All BioCharge samples on an absolute time line (ms), oldest first.
+
+    Each item is a UTC-day bucket: ``value.startTime`` + ``sample.s`` (ms) is the
+    sample time. ``total`` 255 means "not calculated" and is dropped.
+    """
+    out: list[dict[str, Any]] = []
+    for item in items or []:
+        value = item.get("value") or {}
+        start = num(value.get("startTime")) or ts_of(item)
+        for s in value.get("samples") or []:
+            total = num(s.get("total"))
+            if total is None or not 0 <= total <= 100:
+                continue
+            out.append({
+                "t": start + (num(s.get("s")) or 0),
+                "total": total,
+                "physical": num(s.get("physical")),
+                "mental": num(s.get("mental")),
+            })
+    out.sort(key=lambda x: x["t"])
+    return out
+
+
+def _local_day_bounds(day: dt.date, tz: dt.tzinfo) -> tuple[float, float]:
+    start = dt.datetime.combine(day, dt.time.min, tzinfo=tz)
+    end = start + dt.timedelta(days=1)
+    return start.timestamp() * 1000, end.timestamp() * 1000
+
+
+def parse_charge(items: list[dict[str, Any]], tz: dt.tzinfo, today: dt.date) -> dict[str, Any] | None:
+    samples = _charge_samples(items)
+    if not samples:
+        return None
+    last = samples[-1]
+    lo, hi = _local_day_bounds(today, tz)
+    today_vals = [s["total"] for s in samples if lo <= s["t"] < hi]
+
+    def r(v: float | None) -> int | None:
+        return None if v is None else int(round(v))
+
+    return {
+        "biocharge": r(last["total"]),
+        "biocharge_physical": r(last["physical"]),
+        "biocharge_mental": r(last["mental"]),
+        "biocharge_measured_at": ms_to_dt(last["t"]).isoformat(),
+        "biocharge_today_min": r(min(today_vals)) if today_vals else None,
+        "biocharge_today_max": r(max(today_vals)) if today_vals else None,
+    }
+
+
+# --------------------------------------------------------------------------
+# Respiratory rate (v2 RespiratoryRate / real_data)
+# --------------------------------------------------------------------------
+def parse_respiratory_rate(
+    items: list[dict[str, Any]],
+    sleep_start_s: float | None = None,
+    sleep_end_s: float | None = None,
+) -> dict[str, Any] | None:
+    """Overnight breathing rate.
+
+    ``value.measurements`` is base64 of 1440 bytes, one breaths-per-minute value
+    per minute of the UTC-day bucket that starts at the item timestamp; 0 = none.
+    """
+    points: list[tuple[float, int]] = []
+    for item in newest_first(items)[:3]:
+        raw = _b64((item.get("value") or {}).get("measurements"))
+        start = ts_of(item)
+        for minute, rate in enumerate(raw):
+            if 0 < rate < 60:
+                points.append((start + minute * 60000, rate))
+    if not points:
+        return None
+    points.sort()
+    window = points
+    if sleep_start_s and sleep_end_s:
+        lo, hi = (sleep_start_s - 1800) * 1000, (sleep_end_s + 1800) * 1000
+        window = [p for p in points if lo <= p[0] <= hi]
+    if not window:
+        last = points[-1][0]
+        window = [p for p in points if p[0] >= last - 12 * 3600 * 1000]
+    values = [v for _, v in window]
+    return {
+        "respiratory_rate": round(sum(values) / len(values), 1),
+        "respiratory_rate_min": min(values),
+        "respiratory_rate_max": max(values),
+        "respiratory_rate_minutes": len(values),
+    }
+
+
+# --------------------------------------------------------------------------
+# Yesterday summary (complete values straight from the cloud)
+# --------------------------------------------------------------------------
+def _local_date_of_ms(ms: float, tz: dt.tzinfo) -> str | None:
+    d = ms_to_dt(ms)
+    return d.astimezone(tz).strftime("%Y-%m-%d") if d else None
+
+
+def parse_yesterday(
+    band_items: list[dict[str, Any]],
+    stress_items: list[dict[str, Any]],
+    pai_items: list[dict[str, Any]],
+    charge_items: list[dict[str, Any]],
+    tz: dt.tzinfo,
+    yesterday: dt.date,
+) -> dict[str, Any] | None:
+    """Everything the dashboard shows for 'yesterday', taken from the cloud.
+
+    Unlike a snapshot taken at 23:59 this also contains data the phone uploads
+    after midnight. ``sleep_*`` is the night that ended on yesterday's morning.
+    """
+    day = yesterday.strftime("%Y-%m-%d")
+    out: dict[str, Any] = {"date": day}
+
+    band = [i for i in band_items or [] if i.get("date_time") == day]
+    if band:
+        activity = parse_activity_today(band, day) or {}
+        out["steps"] = activity.get("steps")
+        out["distance_km"] = round(activity["distance"] / 1000, 2) if activity.get("distance") is not None else None
+        out["calories"] = activity.get("calories")
+        hr = parse_heart_rate(band, tz) or {}
+        out["hr_avg"] = num_int(hr.get("hr_avg"))
+        out["hr_min"] = hr.get("hr_min")
+        out["hr_max"] = hr.get("hr_max")
+        sleep = parse_sleep(band) or {}
+        out["resting_hr"] = sleep.get("sleep_rhr")
+        out["sleep_duration"] = sleep.get("sleep_duration")
+        out["sleep_score"] = sleep.get("sleep_score")
+        out["sleep_deep"] = sleep.get("deep_sleep")
+        out["sleep_light"] = sleep.get("light_sleep")
+        out["sleep_rem"] = sleep.get("rem_sleep")
+        out["sleep_awake"] = sleep.get("awake_time")
+        out["sleep_wake_count"] = sleep.get("wake_count")
+        out["sleep_start"] = sleep.get("sleep_start")
+        out["sleep_end"] = sleep.get("sleep_end")
+
+    for item in stress_items or []:
+        if _local_date_of_ms(ts_of(item), tz) == day:
+            out["stress_avg"] = num_int(item.get("avgStress"))
+            out["stress_min"] = num_int(item.get("minStress"))
+            out["stress_max"] = num_int(item.get("maxStress"))
+            break
+
+    for item in newest_first(pai_items):
+        if _local_date_of_ms(ts_of(item), tz) == day and num(item.get("totalPai")) is not None:
+            out["pai"] = round(num(item.get("totalPai")) or 0.0, 1)
+            out["daily_pai"] = round(num(item.get("dailyPai")) or 0.0, 1)
+            break
+
+    lo, hi = _local_day_bounds(yesterday, tz)
+    day_charge = [s["total"] for s in _charge_samples(charge_items) if lo <= s["t"] < hi]
+    if day_charge:
+        out["biocharge_max"] = int(round(max(day_charge)))
+        out["biocharge_min"] = int(round(min(day_charge)))
+
+    return out if len(out) > 1 else None

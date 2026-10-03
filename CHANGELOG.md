@@ -2,6 +2,21 @@
 
 This is a fork of [yardeff/ha-zepp](https://github.com/yardeff/ha-zepp).
 
+## 1.2.0
+
+### Added
+- **BioCharge** (`Charge/real_data`, updated every minute on the watch): three sensors
+  `biocharge`, `biocharge_physical`, `biocharge_mental`. The total sensor has `today_min`,
+  `today_max` and `measured_at` attributes. Samples with `total` 255 (not calculated) are skipped.
+- **Sleep Start** / **Sleep End**: timestamp sensors for bedtime and wake time of the last night.
+- **Respiratory Rate**: overnight average breaths per minute, with min / max attributes.
+- **Yesterday Summary**: state is yesterday's date; attributes hold yesterday's complete values
+  straight from the cloud (steps, distance, calories, heart rate avg/min/max, resting HR, stress
+  avg/min/max, PAI, BioCharge max/min and the night that ended yesterday morning). Unlike a
+  23:59 snapshot it also includes data the phone uploads after midnight.
+- New entities follow the entity-id prefix of the device's existing sensors
+  (e.g. `sensor.amazfit_steps` -> `sensor.amazfit_biocharge`).
+
 ## 1.1.0
 
 Fixes for values that were stale or never arrived. Entity IDs and unique IDs are unchanged,

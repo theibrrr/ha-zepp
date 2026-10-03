@@ -126,3 +126,40 @@ def test_sport_load_newest_day():
                                                    "wtlSumOptimalMin": 54, "wtlSumOptimalMax": 182}]
     out = P.parse_sport_load(items)
     assert out["training_load_total"] == 0 and out["training_load_min"] == 54
+
+
+def _charge_item(start_ms, totals):
+    return {"timestamp": start_ms, "value": {"startTime": start_ms, "samples": [
+        {"s": i * 60000, "total": t, "physical": t - 1.4, "mental": t + 1.4} for i, t in enumerate(totals)]}}
+
+
+def test_biocharge_current_and_local_day_range():
+    tz = dt.timezone(dt.timedelta(hours=2))
+    start = int(dt.datetime(2026, 10, 3, 0, 0, tzinfo=dt.timezone.utc).timestamp() * 1000)  # 02:00 local
+    out = P.parse_charge([_charge_item(start, [40, 55, 30, 255])], tz, dt.date(2026, 10, 3))
+    assert out["biocharge"] == 30          # 255 = not calculated, skipped
+    assert out["biocharge_physical"] == 29 and out["biocharge_mental"] == 31
+    assert (out["biocharge_today_min"], out["biocharge_today_max"]) == (30, 55)
+
+
+def test_respiratory_rate_in_sleep_window():
+    start = 1790985600000  # bucket start (UTC midnight)
+    raw = bytes([0] * 10 + [15, 17, 19] + [0] * 1427)
+    item = {"timestamp": start, "value": {"measurements": base64.b64encode(raw).decode()}}
+    out = P.parse_respiratory_rate([item], start / 1000, start / 1000 + 3600)
+    assert out["respiratory_rate"] == 17.0 and out["respiratory_rate_min"] == 15
+
+
+def test_yesterday_summary_from_cloud():
+    tz = dt.timezone(dt.timedelta(hours=2))
+    y = dt.date(2026, 10, 2)
+    band = [_band_day("2026-10-02", {"dp": 73, "lt": 262, "dt": 115, "ss": 89, "rhr": 63}, steps=10684,
+                      hr=[60, 90, 120])]
+    midnight = int(dt.datetime(2026, 10, 2, tzinfo=tz).timestamp() * 1000)
+    stress = [{"timestamp": midnight + 1, "avgStress": "36", "minStress": "5", "maxStress": "66"}]
+    pai = [{"timestamp": midnight, "totalPai": "16.35", "dailyPai": "16.19"}]
+    charge = [_charge_item(midnight + 6 * 3600000, [86, 50, 25])]
+    out = P.parse_yesterday(band, stress, pai, charge, tz, y)
+    assert out["date"] == "2026-10-02" and out["steps"] == 10684 and out["hr_avg"] == 90
+    assert out["sleep_score"] == 89 and out["stress_avg"] == 36 and out["pai"] == 16.4
+    assert (out["biocharge_max"], out["biocharge_min"]) == (86, 25)
