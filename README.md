@@ -2,7 +2,11 @@
 
 [English](README.md) | [Русский](README.ru.md)
 
-Follow news and updates in Telegram: [@yardev_code](https://t.me/yardev_code)
+> **About this fork:** maintained at [theibrrr/ha-zepp](https://github.com/theibrrr/ha-zepp), based on
+> [yardeff/ha-zepp](https://github.com/yardeff/ha-zepp). It fixes stale sleep / stress / PAI / HRV /
+> readiness values and missing SpO2 and weight data. See [CHANGELOG.md](CHANGELOG.md).
+
+Original author's news and updates in Telegram: [@yardev_code](https://t.me/yardev_code)
 
 Home Assistant integration for connecting **Amazfit and Zepp smartwatches and fitness bands** using the official Zepp cloud APIs.
 
@@ -158,7 +162,7 @@ Unlike solutions that require installing third-party JavaScript apps on your wat
 1. Open **HACS -> Integrations** in Home Assistant.
 2. In the top right corner, click the menu (three dots) -> **Custom repositories**.
 3. Fill in:
-   * **Repository:** `https://github.com/yardeff/ha-zepp`
+   * **Repository:** `https://github.com/theibrrr/ha-zepp`
    * **Type:** `Integration`
 4. Click **Add**, find **Zepp (Amazfit)** in the list, and click **Download**.
 5. Restart Home Assistant.

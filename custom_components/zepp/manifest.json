@@ -1,12 +1,18 @@
 {
   "domain": "zepp",
   "name": "Zepp (Amazfit)",
-  "codeowners": ["@yardeff"],
+  "codeowners": [
+    "@theibrrr",
+    "@yardeff"
+  ],
   "config_flow": true,
-  "dependencies": ["http", "recorder"],
-  "documentation": "https://github.com/yardeff/ha-zepp",
+  "dependencies": [
+    "http",
+    "recorder"
+  ],
+  "documentation": "https://github.com/theibrrr/ha-zepp",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/yardeff/ha-zepp/issues",
+  "issue_tracker": "https://github.com/theibrrr/ha-zepp/issues",
   "requirements": [],
-  "version": "1.0.2"
+  "version": "1.1.0"
 }

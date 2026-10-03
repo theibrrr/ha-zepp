@@ -30,6 +30,11 @@ from .coordinator import ZeppCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 
+def _attrs(data: dict[str, Any], mapping: dict[str, str]) -> dict[str, Any]:
+    """Build an attribute dict from coordinator data, skipping missing values."""
+    return {attr: data.get(key) for attr, key in mapping.items() if data.get(key) is not None}
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -124,10 +129,9 @@ async def async_setup_entry(
             ZeppPaiSensor(coordinator, device_id, device_name, device_info),
             ZeppHrvSensor(coordinator, device_id, device_name, device_info),
         ]
-        if coordinator.data.get("readiness_score") is not None:
-            health_sensors.append(
-                ZeppReadinessScoreSensor(coordinator, device_id, device_name, device_info)
-            )
+        health_sensors.append(
+            ZeppReadinessScoreSensor(coordinator, device_id, device_name, device_info)
+        )
         entities.extend(health_sensors)
 
         # 5. Training Load
@@ -141,8 +145,9 @@ async def async_setup_entry(
             entities.extend([
                 ZeppWeightSensor(coordinator, device_id, device_name, device_info),
                 ZeppBmiSensor(coordinator, device_id, device_name, device_info),
-                ZeppBodyFatSensor(coordinator, device_id, device_name, device_info),
             ])
+            if coordinator.data.get("body_fat") is not None:
+                entities.append(ZeppBodyFatSensor(coordinator, device_id, device_name, device_info))
 
         # 7. Historical Sync Status
         entities.append(
@@ -346,6 +351,14 @@ class ZeppSleepDurationSensor(CoordinatorEntity[ZeppCoordinator], SensorEntity):
     def native_value(self) -> int | None:
         return self.coordinator.data.get("sleep_duration")
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return _attrs(self.coordinator.data, {
+            "sleep_start": "sleep_start",
+            "sleep_end": "sleep_end",
+            "night_of": "sleep_date",
+        })
+
 
 class ZeppDeepSleepSensor(CoordinatorEntity[ZeppCoordinator], SensorEntity):
     _attr_has_entity_name = True
@@ -479,6 +492,8 @@ class ZeppHeartRateSensor(CoordinatorEntity[ZeppCoordinator], SensorEntity):
             attrs["max_heart_rate"] = self.coordinator.data["hr_max"]
         if self.coordinator.data.get("hr_avg") is not None:
             attrs["avg_heart_rate"] = self.coordinator.data["hr_avg"]
+        if self.coordinator.data.get("hr_measured_at") is not None:
+            attrs["measured_at"] = self.coordinator.data["hr_measured_at"]
         return attrs
 
 
@@ -522,6 +537,14 @@ class ZeppStressSensor(CoordinatorEntity[ZeppCoordinator], SensorEntity):
             attrs["min_stress"] = self.coordinator.data["stress_min"]
         if self.coordinator.data.get("stress_max") is not None:
             attrs["max_stress"] = self.coordinator.data["stress_max"]
+        attrs.update(_attrs(self.coordinator.data, {
+            "avg_stress": "stress_avg",
+            "relaxed_percent": "stress_relaxed_pct",
+            "normal_percent": "stress_normal_pct",
+            "medium_percent": "stress_medium_pct",
+            "high_percent": "stress_high_pct",
+            "measured_at": "stress_measured_at",
+        }))
         return attrs
 
 
@@ -541,6 +564,10 @@ class ZeppSpO2Sensor(CoordinatorEntity[ZeppCoordinator], SensorEntity):
     def native_value(self) -> int | None:
         return self.coordinator.data.get("spo2")
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return _attrs(self.coordinator.data, {"measured_at": "spo2_measured_at"})
+
 
 class ZeppBreathingScoreSensor(CoordinatorEntity[ZeppCoordinator], SensorEntity):
     _attr_has_entity_name = True
@@ -557,6 +584,15 @@ class ZeppBreathingScoreSensor(CoordinatorEntity[ZeppCoordinator], SensorEntity)
     @property
     def native_value(self) -> int | None:
         return self.coordinator.data.get("breathing_score")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return _attrs(self.coordinator.data, {
+            "odi": "odi",
+            "desaturation_events": "odi_events",
+            "measured_minutes": "spo2_measured_minutes",
+            "night_of": "odi_night",
+        })
 
 
 class ZeppReadinessScoreSensor(CoordinatorEntity[ZeppCoordinator], SensorEntity):
@@ -575,6 +611,19 @@ class ZeppReadinessScoreSensor(CoordinatorEntity[ZeppCoordinator], SensorEntity)
     def native_value(self) -> int | None:
         return self.coordinator.data.get("readiness_score")
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return _attrs(self.coordinator.data, {
+            "hrv_score": "readiness_hrv_score",
+            "resting_hr_score": "readiness_rhr_score",
+            "physical_recovery": "readiness_physical",
+            "mental_recovery": "readiness_mental",
+            "sleep_hrv": "readiness_sleep_hrv",
+            "sleep_resting_hr": "readiness_sleep_rhr",
+            "breathing_score": "readiness_ahi_score",
+            "updated_at": "readiness_updated_at",
+        })
+
 
 class ZeppPaiSensor(CoordinatorEntity[ZeppCoordinator], SensorEntity):
     _attr_has_entity_name = True
@@ -592,6 +641,15 @@ class ZeppPaiSensor(CoordinatorEntity[ZeppCoordinator], SensorEntity):
     def native_value(self) -> float | None:
         return self.coordinator.data.get("total_pai")
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return _attrs(self.coordinator.data, {
+            "daily_pai": "daily_pai",
+            "low_zone_minutes": "pai_low_zone_minutes",
+            "medium_zone_minutes": "pai_medium_zone_minutes",
+            "high_zone_minutes": "pai_high_zone_minutes",
+        })
+
 
 class ZeppHrvSensor(CoordinatorEntity[ZeppCoordinator], SensorEntity):
     _attr_has_entity_name = True
@@ -608,6 +666,16 @@ class ZeppHrvSensor(CoordinatorEntity[ZeppCoordinator], SensorEntity):
     @property
     def native_value(self) -> float | None:
         return self.coordinator.data.get("hrv")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return _attrs(self.coordinator.data, {
+            "last_sample": "hrv_last",
+            "last_sample_at": "hrv_last_at",
+            "min": "hrv_min",
+            "max": "hrv_max",
+            "samples": "hrv_samples",
+        })
 
 
 # ==================== Training Load Sensors ====================
@@ -632,6 +700,7 @@ class ZeppTrainingLoadSensor(CoordinatorEntity[ZeppCoordinator], SensorEntity):
         return {
             "optimal_min": self.coordinator.data.get("training_load_min"),
             "optimal_max": self.coordinator.data.get("training_load_max"),
+            "overreaching": self.coordinator.data.get("training_load_overreaching"),
         }
 
 

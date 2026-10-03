@@ -46,6 +46,7 @@ _DYNAMIC_CATALOG: dict[int, str] = {
     10158337: "Amazfit Bip 6",
     10879233: "Amazfit T-Rex Ultra 2",
     11141377: "Amazfit Balance 3",
+    11206915: "Amazfit Bip Max",
 }
 
 

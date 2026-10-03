@@ -513,8 +513,12 @@ async def async_fetch_user_events(
     from_ts: int | None = None,
     to_ts: int | None = None,
     limit: int = 20,
+    reverse: bool | None = None,
 ) -> list[dict[str, Any]]:
-    """Fetch user-scoped events (e.g. all_day_stress, blood_oxygen, PaiHealthInfo)."""
+    """Fetch user-scoped events (e.g. all_day_stress, blood_oxygen, PaiHealthInfo).
+
+    The server returns items oldest-first unless ``reverse=True`` (newest-first).
+    """
     url = f"{sanitize_region_host(host)}/users/{userid}/events"
     headers = get_default_headers(apptoken)
     params: dict[str, Any] = {
@@ -528,6 +532,8 @@ async def async_fetch_user_events(
         params["from"] = str(from_ts)
     if to_ts is not None:
         params["to"] = str(to_ts)
+    if reverse is not None:
+        params["reverse"] = "1" if reverse else "0"
 
     try:
         async with session.get(url, headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=15)) as resp:
@@ -554,6 +560,7 @@ async def async_fetch_v2_events(
     from_ts: int | None = None,
     to_ts: int | None = None,
     limit: int = 20,
+    reverse: bool | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch v2 events (e.g. HRVRMSSD, Charge/stress_data, RespiratoryRate)."""
     url = f"{sanitize_region_host(host)}/v2/users/me/events"
@@ -568,6 +575,8 @@ async def async_fetch_v2_events(
         params["from"] = str(from_ts)
     if to_ts is not None:
         params["to"] = str(to_ts)
+    if reverse is not None:
+        params["reverse"] = "1" if reverse else "0"
 
     try:
         async with session.get(url, headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=15)) as resp:
@@ -581,6 +590,51 @@ async def async_fetch_v2_events(
         raise
     except Exception as err:
         _LOGGER.debug("Error fetching v2 events (%s): %s", event_type, err)
+
+    return []
+
+
+async def async_fetch_user_events_by_date(
+    session: aiohttp.ClientSession,
+    host: str,
+    apptoken: str,
+    userid: str,
+    event_type: str,
+    sub_type: str,
+    from_date: str,
+    to_date: str,
+    time_zone: str,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Fetch user events addressed by calendar dates (``/events/dateString``).
+
+    The nightly blood-oxygen summary (``blood_oxygen`` / ``odi``) is only served here.
+    """
+    url = f"{sanitize_region_host(host)}/users/{userid}/events/dateString"
+    headers = get_default_headers(apptoken)
+    params = {
+        "eventType": event_type,
+        "subType": sub_type,
+        "from": from_date,
+        "to": to_date,
+        "timeZone": time_zone,
+        "limit": str(limit),
+        "reverse": "1",
+        "userId": userid,
+    }
+    try:
+        async with session.get(url, headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                return data.get("items", [])
+            elif resp.status == 401:
+                _LOGGER.warning("Zepp API returned 401 Unauthorized for dated events (%s). Token may be expired.", event_type)
+                raise ZeppAuthError("Zepp token expired (HTTP 401)")
+            _LOGGER.debug("Dated events request (%s/%s) failed: HTTP %s", event_type, sub_type, resp.status)
+    except ZeppAuthError:
+        raise
+    except Exception as err:
+        _LOGGER.debug("Error fetching dated events (%s): %s", event_type, err)
 
     return []
 
@@ -601,6 +655,7 @@ async def async_fetch_sport_load(
         "startDay": start_day,
         "endDay": end_day,
         "limit": str(limit),
+        "isReverse": "true",
     }
 
     try:
