@@ -137,6 +137,19 @@ Unlike solutions that require installing third-party JavaScript apps on your wat
 | **Respiratory Rate** | `_respiratory_rate` | breaths/min | Overnight average. Attributes: `min`, `max` |
 | **Yesterday Summary** | `_yesterday_summary` | date | Yesterday's complete values from the cloud as attributes |
 
+### 5c. Long-term statistics (1.3.0)
+
+Detail data from the watch is written as external statistics that you can show with the
+**Statistics graph** card (pick e.g. `zepp:biocharge` as entity):
+
+| Statistic | Resolution | Source |
+| :--- | :--- | :--- |
+| `zepp:heart_rate`, `zepp:biocharge` | hourly mean / min / max | per-minute data |
+| `zepp:stress` | hourly mean / min / max | 5-minute data |
+| `zepp:hrv`, `zepp:respiratory_rate` | hourly mean / min / max | overnight data |
+| `zepp:steps`, `zepp:distance`, `zepp:calories` | hourly sum | per-minute steps |
+| `zepp:sleep_*`, `zepp:pai`, `zepp:readiness`, `zepp:hrv_night`, `zepp:breathing_score` | daily | daily records |
+
 ### 5. Workout Training Load
 
 | Sensor | Entity ID Suffix | State Class | Description / Attributes |

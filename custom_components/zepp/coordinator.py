@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime
 import json
 import logging
+import time
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -41,6 +42,7 @@ from .parsers import (
     parse_stress,
     parse_weight,
 )
+from .statistics import async_write_statistics
 from .const import (
     CONF_APPTOKEN,
     CONF_CNAME,
@@ -363,15 +365,52 @@ class ZeppCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         pass
             result["device_batteries"] = batteries
 
+        # Raw items are kept for the hourly statistics writer (statistics.py).
+        self.raw_items = {
+            "band": band_items,
+            "stress": stress_items or [],
+            "pai": pai_items or [],
+            "readiness": rd_v2 or rd_v1,
+            "odi": odi_items or [],
+            "charge": charge_items,
+            "hrv": hrv_items or [],
+            "respiratory": resp_items or [],
+        }
+
         # Internal helper keys are not exposed.
         result.pop("_sleep_start_s", None)
         result.pop("_sleep_end_s", None)
         return result
 
+    STATISTICS_INTERVAL = 3600  # seconds between zepp:* statistics writes
+
+    def _schedule_statistics(self) -> None:
+        """Write the last days of detail data as zepp:* statistics, at most once an hour."""
+        if not isinstance(self.entry, ConfigEntry):
+            return
+        mono = time.monotonic()
+        if mono - getattr(self, "_last_statistics_write", -1e9) < self.STATISTICS_INTERVAL:
+            return
+        raw = getattr(self, "raw_items", None)
+        if not raw or not any(raw.values()):
+            return
+        self._last_statistics_write = mono
+        tz = dt_util.get_time_zone(self.hass.config.time_zone) or dt_util.UTC
+
+        async def _write() -> None:
+            try:
+                await async_write_statistics(self.hass, raw, tz, dt_util.now())
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.warning("Writing Zepp statistics failed: %s", err)
+
+        self.entry.async_create_background_task(self.hass, _write(), "zepp_statistics")
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from Zepp API with automatic retry and token refresh on auth errors."""
         try:
-            return await self._fetch_metrics()
+            data = await self._fetch_metrics()
+            self._schedule_statistics()
+            return data
         except ZeppAuthError as auth_err:
             refreshed = await self._async_refresh_token()
             if refreshed:

@@ -2,6 +2,31 @@
 
 This is a fork of [yardeff/ha-zepp](https://github.com/yardeff/ha-zepp).
 
+## 1.3.0
+
+### Changed
+- **Long-term statistics are now external statistics** (`zepp:*`) instead of being written into
+  the statistics of the live sensors. Home Assistant keeps compiling its own sensor statistics
+  untouched, so the running sums of steps / distance / calories can no longer be corrupted.
+- The **history import** (first start, the "Sync Full History" button and `zepp.sync_history`) was
+  rewritten on top of the same writer. It is safe to run again at any time: rows are upserted and
+  running sums continue from the last row before the imported period. It runs once automatically
+  after upgrading to 1.3.0. Per-minute streams are imported for up to 60 days.
+- Fixed a deprecation: statistics metadata now uses `mean_type` / `unit_class`
+  (`has_mean` was removed in Home Assistant 2026.4).
+
+### Added
+- Hourly mean/min/max statistics built from the watch's own detail data, so graphs show what the
+  watch measured even if Home Assistant only polled every few minutes or the phone uploaded late:
+  `zepp:heart_rate` (per minute), `zepp:stress` (per 5 min), `zepp:biocharge` (per minute),
+  `zepp:hrv`, `zepp:respiratory_rate` (overnight).
+- Hourly sum statistics `zepp:steps`, `zepp:distance`, `zepp:calories`.
+- Daily statistics (at local midnight): `zepp:sleep_score`, `zepp:sleep_duration`,
+  `zepp:deep_sleep`, `zepp:light_sleep`, `zepp:rem_sleep`, `zepp:awake_time`,
+  `zepp:sleep_resting_hr`, `zepp:pai`, `zepp:readiness`, `zepp:hrv_night`, `zepp:breathing_score`.
+- The last 3 days are re-written every hour from the regular poll, so late uploads fill in.
+- Use them with the Statistics graph card (entity `zepp:biocharge` etc.).
+
 ## 1.2.0
 
 ### Added
